@@ -1,6 +1,141 @@
+/*! @name videojs-playlist @version 4.2.6 @license Apache-2.0 */
 import videojs from 'video.js';
-import playItem from './play-item';
-import * as autoadvance from './auto-advance';
+
+/**
+ * Validates a number of seconds to use as the auto-advance delay.
+ *
+ * @private
+ * @param   {number} s
+ *          The number to check
+ *
+ * @return  {boolean}
+ *          Whether this is a valid second or not
+ */
+var validSeconds = function validSeconds(s) {
+  return typeof s === 'number' && !isNaN(s) && s >= 0 && s < Infinity;
+};
+/**
+ * Resets the auto-advance behavior of a player.
+ *
+ * @param {Player} player
+ *        The player to reset the behavior on
+ */
+
+
+var reset = function reset(player) {
+  var aa = player.playlist.autoadvance_;
+
+  if (aa.timeout) {
+    player.clearTimeout(aa.timeout);
+  }
+
+  if (aa.trigger) {
+    player.off('ended', aa.trigger);
+  }
+
+  aa.timeout = null;
+  aa.trigger = null;
+};
+/**
+ * Sets up auto-advance behavior on a player.
+ *
+ * @param  {Player} player
+ *         the current player
+ *
+ * @param  {number} delay
+ *         The number of seconds to wait before each auto-advance.
+ *
+ * @return {undefined}
+ *         Used to short circuit function logic
+ */
+
+
+var setup = function setup(player, delay) {
+  reset(player); // Before queuing up new auto-advance behavior, check if `seconds` was
+  // called with a valid value.
+
+  if (!validSeconds(delay)) {
+    player.playlist.autoadvance_.delay = null;
+    return;
+  }
+
+  player.playlist.autoadvance_.delay = delay;
+
+  player.playlist.autoadvance_.trigger = function () {
+    // This calls setup again, which will reset the existing auto-advance and
+    // set up another auto-advance for the next "ended" event.
+    var cancelOnPlay = function cancelOnPlay() {
+      return setup(player, delay);
+    }; // If there is a "play" event while we're waiting for an auto-advance,
+    // we need to cancel the auto-advance. This could mean the user seeked
+    // back into the content or restarted the content. This is reproducible
+    // with an auto-advance > 0.
+
+
+    player.one('play', cancelOnPlay);
+    player.playlist.autoadvance_.timeout = player.setTimeout(function () {
+      reset(player);
+      player.off('play', cancelOnPlay);
+      player.playlist.next();
+    }, delay * 1000);
+  };
+
+  player.one('ended', player.playlist.autoadvance_.trigger);
+};
+
+/**
+ * Removes all remote text tracks from a player.
+ *
+ * @param  {Player} player
+ *         The player to clear tracks on
+ */
+
+var clearTracks = function clearTracks(player) {
+  var tracks = player.remoteTextTracks();
+  var i = tracks && tracks.length || 0; // This uses a `while` loop rather than `forEach` because the
+  // `TextTrackList` object is a live DOM list (not an array).
+
+  while (i--) {
+    player.removeRemoteTextTrack(tracks[i]);
+  }
+};
+/**
+ * Plays an item on a player's playlist.
+ *
+ * @param  {Player} player
+ *         The player to play the item on
+ *
+ * @param  {Object} item
+ *         A source from the playlist.
+ *
+ * @return {Player}
+ *         The player that is now playing the item
+ */
+
+
+var playItem = function playItem(player, item) {
+  var replay = !player.paused() || player.ended();
+  player.trigger('beforeplaylistitem', item);
+  player.poster(item.poster || '');
+  player.src(item.sources);
+  clearTracks(player);
+  player.ready(function () {
+    (item.textTracks || []).forEach(player.addRemoteTextTrack.bind(player));
+    player.trigger('playlistitem', item);
+
+    if (replay) {
+      var playPromise = player.play(); // silence error when a pause interrupts a play request
+      // on browsers which return a promise
+
+      if (typeof playPromise !== 'undefined' && typeof playPromise.then === 'function') {
+        playPromise.then(null, function (e) {});
+      }
+    }
+
+    setup(player, player.playlist.autoadvance_.delay);
+  });
+  return player;
+};
 
 /**
  * Given two sources, check to see whether the two sources are equal.
@@ -17,13 +152,15 @@ import * as autoadvance from './auto-advance';
  * @return {boolean}
  *         The result
  */
-const sourceEquals = (source1, source2) => {
-  let src1 = source1;
-  let src2 = source2;
+
+var sourceEquals = function sourceEquals(source1, source2) {
+  var src1 = source1;
+  var src2 = source2;
 
   if (typeof source1 === 'object') {
     src1 = source1.src;
   }
+
   if (typeof source2 === 'object') {
     src2 = source2.src;
   }
@@ -31,13 +168,13 @@ const sourceEquals = (source1, source2) => {
   if (/^\/\//.test(src1)) {
     src2 = src2.slice(src2.indexOf('//'));
   }
+
   if (/^\/\//.test(src2)) {
     src1 = src1.slice(src1.indexOf('//'));
   }
 
   return src1 === src2;
 };
-
 /**
  * Look through an array of playlist items for a specific `source`;
  * checking both the value of elements and the value of their `src`
@@ -53,13 +190,15 @@ const sourceEquals = (source1, source2) => {
  * @return  {number}
  *          The index of that source or -1
  */
-const indexInSources = (arr, src) => {
-  for (let i = 0; i < arr.length; i++) {
-    const sources = arr[i].sources;
+
+
+var indexInSources = function indexInSources(arr, src) {
+  for (var i = 0; i < arr.length; i++) {
+    var sources = arr[i].sources;
 
     if (Array.isArray(sources)) {
-      for (let j = 0; j < sources.length; j++) {
-        const source = sources[j];
+      for (var j = 0; j < sources.length; j++) {
+        var source = sources[j];
 
         if (source && sourceEquals(source, src)) {
           return i;
@@ -70,7 +209,6 @@ const indexInSources = (arr, src) => {
 
   return -1;
 };
-
 /**
  * Randomize the contents of an array.
  *
@@ -81,21 +219,21 @@ const indexInSources = (arr, src) => {
  * @return {Array}
  *         The same array that was passed in.
  */
-const randomize = (arr) => {
-  let index = -1;
-  const lastIndex = arr.length - 1;
+
+
+var randomize = function randomize(arr) {
+  var index = -1;
+  var lastIndex = arr.length - 1;
 
   while (++index < arr.length) {
-    const rand = index + Math.floor(Math.random() * (lastIndex - index + 1));
-    const value = arr[rand];
-
+    var rand = index + Math.floor(Math.random() * (lastIndex - index + 1));
+    var value = arr[rand];
     arr[rand] = arr[index];
     arr[index] = value;
   }
 
   return arr;
 };
-
 /**
  * Factory function for creating new playlist implementation on the given player.
  *
@@ -127,10 +265,15 @@ const randomize = (arr) => {
  * @return {Function}
  *         Returns the playlist function specific to the given player.
  */
-export default function factory(player, initialList, initialIndex = 0) {
-  let list = null;
-  let changing = false;
 
+
+function factory(player, initialList, initialIndex) {
+  if (initialIndex === void 0) {
+    initialIndex = 0;
+  }
+
+  var list = null;
+  var changing = false;
   /**
    * Get/set the playlist for a player.
    *
@@ -149,70 +292,71 @@ export default function factory(player, initialList, initialIndex = 0) {
    * @return {Array}
    *         The playlist
    */
-  const playlist = player.playlist = (newList, newIndex = 0) => {
+
+  var playlist = player.playlist = function (newList, newIndex) {
+    if (newIndex === void 0) {
+      newIndex = 0;
+    }
+
     if (changing) {
       throw new Error('do not call playlist() during a playlist change');
     }
 
     if (Array.isArray(newList)) {
-
       // @todo - Simplify this to `list.slice()` for v5.
-      const previousPlaylist = Array.isArray(list) ? list.slice() : null;
+      var previousPlaylist = Array.isArray(list) ? list.slice() : null;
+      list = newList.slice(); // Mark the playlist as changing during the duringplaylistchange lifecycle.
 
-      list = newList.slice();
-
-      // Mark the playlist as changing during the duringplaylistchange lifecycle.
       changing = true;
-
       player.trigger({
         type: 'duringplaylistchange',
         nextIndex: newIndex,
         nextPlaylist: list,
         previousIndex: playlist.currentIndex_,
-
         // @todo - Simplify this to simply pass along `previousPlaylist` for v5.
         previousPlaylist: previousPlaylist || []
       });
-
       changing = false;
 
       if (newIndex !== -1) {
         playlist.currentItem(newIndex);
-      }
-
-      // The only time the previous playlist is null is the first call to this
+      } // The only time the previous playlist is null is the first call to this
       // function. This allows us to fire the `duringplaylistchange` event
       // every time the playlist is populated and to maintain backward
       // compatibility by not firing the `playlistchange` event on the initial
       // population of the list.
       //
       // @todo - Remove this condition in preparation for v5.
+
+
       if (previousPlaylist) {
-        player.setTimeout(() => {
+        player.setTimeout(function () {
           player.trigger('playlistchange');
         }, 0);
       }
-    }
+    } // Always return a shallow clone of the playlist list.
 
-    // Always return a shallow clone of the playlist list.
+
     return list.slice();
-  };
+  }; // On a new source, if there is no current item, disable auto-advance.
 
-  // On a new source, if there is no current item, disable auto-advance.
-  player.on('loadstart', () => {
+
+  player.on('loadstart', function () {
     if (playlist.currentItem() === -1) {
-      autoadvance.reset(player);
+      reset(player);
     }
   });
-
   playlist.currentIndex_ = -1;
   playlist.player_ = player;
   playlist.autoadvance_ = {};
   playlist.repeat_ = false;
 
-  playlist.append = (appendList) => {
+  playlist.append = function (appendList) {
+    var _list;
+
     console.log('APPENDING>>>>>>>>>', appendList);
-    list.push(...appendList);
+
+    (_list = list).push.apply(_list, appendList);
   };
   /**
    * Get or set the current item in the playlist.
@@ -225,31 +369,23 @@ export default function factory(player, initialList, initialIndex = 0) {
    * @return {number}
    *         The current item index.
    */
-  playlist.currentItem = (index) => {
 
+
+  playlist.currentItem = function (index) {
     // If the playlist is changing, only act as a getter.
     if (changing) {
       return playlist.currentIndex_;
     }
 
-    if (
-      typeof index === 'number' &&
-      playlist.currentIndex_ !== index &&
-      index >= 0 &&
-      index < list.length
-    ) {
+    if (typeof index === 'number' && playlist.currentIndex_ !== index && index >= 0 && index < list.length) {
       playlist.currentIndex_ = index;
-      playItem(
-        playlist.player_,
-        list[playlist.currentIndex_]
-      );
+      playItem(playlist.player_, list[playlist.currentIndex_]);
     } else {
       playlist.currentIndex_ = playlist.indexOf(playlist.player_.currentSrc() || '');
     }
 
     return playlist.currentIndex_;
   };
-
   /**
    * Checks if the playlist contains a value.
    *
@@ -259,10 +395,11 @@ export default function factory(player, initialList, initialIndex = 0) {
    * @return {boolean}
    *         The result
    */
-  playlist.contains = (value) => {
+
+
+  playlist.contains = function (value) {
     return playlist.indexOf(value) !== -1;
   };
-
   /**
    * Gets the index of a value in the playlist or -1 if not found.
    *
@@ -272,15 +409,17 @@ export default function factory(player, initialList, initialIndex = 0) {
    * @return {number}
    *         The index or -1
    */
-  playlist.indexOf = (value) => {
+
+
+  playlist.indexOf = function (value) {
     if (typeof value === 'string') {
       return indexInSources(list, value);
     }
 
-    const sources = Array.isArray(value) ? value : value.sources;
+    var sources = Array.isArray(value) ? value : value.sources;
 
-    for (let i = 0; i < sources.length; i++) {
-      const source = sources[i];
+    for (var i = 0; i < sources.length; i++) {
+      var source = sources[i];
 
       if (typeof source === 'string') {
         return indexInSources(list, source);
@@ -291,7 +430,6 @@ export default function factory(player, initialList, initialIndex = 0) {
 
     return -1;
   };
-
   /**
    * Get the index of the current item in the playlist. This is identical to
    * calling `currentItem()` with no arguments.
@@ -299,8 +437,11 @@ export default function factory(player, initialList, initialIndex = 0) {
    * @return {number}
    *         The current item index.
    */
-  playlist.currentIndex = () => playlist.currentItem();
 
+
+  playlist.currentIndex = function () {
+    return playlist.currentItem();
+  };
   /**
    * Get the index of the last item in the playlist.
    *
@@ -308,8 +449,11 @@ export default function factory(player, initialList, initialIndex = 0) {
    *         The index of the last item in the playlist or -1 if there are no
    *         items.
    */
-  playlist.lastIndex = () => list.length - 1;
 
+
+  playlist.lastIndex = function () {
+    return list.length - 1;
+  };
   /**
    * Get the index of the next item in the playlist.
    *
@@ -317,24 +461,24 @@ export default function factory(player, initialList, initialIndex = 0) {
    *         The index of the next item in the playlist or -1 if there is no
    *         current item.
    */
-  playlist.nextIndex = () => {
-    const current = playlist.currentItem();
+
+
+  playlist.nextIndex = function () {
+    var current = playlist.currentItem();
 
     if (current === -1) {
       return -1;
     }
 
-    const lastIndex = playlist.lastIndex();
+    var lastIndex = playlist.lastIndex(); // When repeating, loop back to the beginning on the last item.
 
-    // When repeating, loop back to the beginning on the last item.
     if (playlist.repeat_ && current === lastIndex) {
       return 0;
-    }
+    } // Don't go past the end of the playlist.
 
-    // Don't go past the end of the playlist.
+
     return Math.min(current + 1, lastIndex);
   };
-
   /**
    * Get the index of the previous item in the playlist.
    *
@@ -342,29 +486,32 @@ export default function factory(player, initialList, initialIndex = 0) {
    *         The index of the previous item in the playlist or -1 if there is
    *         no current item.
    */
-  playlist.previousIndex = () => {
-    const current = playlist.currentItem();
+
+
+  playlist.previousIndex = function () {
+    var current = playlist.currentItem();
 
     if (current === -1) {
       return -1;
-    }
+    } // When repeating, loop back to the end of the playlist.
 
-    // When repeating, loop back to the end of the playlist.
+
     if (playlist.repeat_ && current === 0) {
       return playlist.lastIndex();
-    }
+    } // Don't go past the beginning of the playlist.
 
-    // Don't go past the beginning of the playlist.
+
     return Math.max(current - 1, 0);
   };
-
   /**
    * Plays the first item in the playlist.
    *
    * @return {Object|undefined}
    *         Returns undefined and has no side effects if the list is empty.
    */
-  playlist.first = () => {
+
+
+  playlist.first = function () {
     if (changing) {
       return;
     }
@@ -375,14 +522,15 @@ export default function factory(player, initialList, initialIndex = 0) {
 
     playlist.currentIndex_ = -1;
   };
-
   /**
    * Plays the last item in the playlist.
    *
    * @return {Object|undefined}
    *         Returns undefined and has no side effects if the list is empty.
    */
-  playlist.last = () => {
+
+
+  playlist.last = function () {
     if (changing) {
       return;
     }
@@ -393,53 +541,55 @@ export default function factory(player, initialList, initialIndex = 0) {
 
     playlist.currentIndex_ = -1;
   };
-
   /**
    * Plays the next item in the playlist.
    *
    * @return {Object|undefined}
    *         Returns undefined and has no side effects if on last item.
    */
-  playlist.next = () => {
+
+
+  playlist.next = function () {
     if (changing) {
       return;
     }
 
-    const index = playlist.nextIndex();
+    var index = playlist.nextIndex();
 
     if (index !== playlist.currentIndex_) {
       return list[playlist.currentItem(index)];
     }
   };
-
   /**
    * Plays the previous item in the playlist.
    *
    * @return {Object|undefined}
    *         Returns undefined and has no side effects if on first item.
    */
-  playlist.previous = () => {
+
+
+  playlist.previous = function () {
     if (changing) {
       return;
     }
 
-    const index = playlist.previousIndex();
+    var index = playlist.previousIndex();
 
     if (index !== playlist.currentIndex_) {
       return list[playlist.currentItem(index)];
     }
   };
-
   /**
    * Set up auto-advance on the playlist.
    *
    * @param  {number} [delay]
    *         The number of seconds to wait before each auto-advance.
    */
-  playlist.autoadvance = (delay) => {
-    autoadvance.setup(playlist.player_, delay);
-  };
 
+
+  playlist.autoadvance = function (delay) {
+    setup(playlist.player_, delay);
+  };
   /**
    * Sets `repeat` option, which makes the "next" video of the last video in
    * the playlist be the first video in the playlist.
@@ -450,7 +600,9 @@ export default function factory(player, initialList, initialIndex = 0) {
    * @return {boolean}
    *         The current value of repeat
    */
-  playlist.repeat = (val) => {
+
+
+  playlist.repeat = function (val) {
     if (val === undefined) {
       return playlist.repeat_;
     }
@@ -463,7 +615,6 @@ export default function factory(player, initialList, initialIndex = 0) {
     playlist.repeat_ = !!val;
     return playlist.repeat_;
   };
-
   /**
    * Sorts the playlist array.
    *
@@ -473,58 +624,58 @@ export default function factory(player, initialList, initialIndex = 0) {
    * @param {Function} compare
    *        A comparator function as per the native Array method.
    */
-  playlist.sort = (compare) => {
 
+
+  playlist.sort = function (compare) {
     // Bail if the array is empty.
     if (!list.length) {
       return;
     }
 
-    list.sort(compare);
+    list.sort(compare); // If the playlist is changing, don't trigger events.
 
-    // If the playlist is changing, don't trigger events.
     if (changing) {
       return;
     }
-
     /**
      * Triggered after the playlist is sorted internally.
      *
      * @event playlistsorted
      * @type {Object}
      */
+
+
     player.trigger('playlistsorted');
   };
-
   /**
    * Reverses the playlist array.
    *
    * @see {@link https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/reverse}
    * @fires playlistsorted
    */
-  playlist.reverse = () => {
 
+
+  playlist.reverse = function () {
     // Bail if the array is empty.
     if (!list.length) {
       return;
     }
 
-    list.reverse();
+    list.reverse(); // If the playlist is changing, don't trigger events.
 
-    // If the playlist is changing, don't trigger events.
     if (changing) {
       return;
     }
-
     /**
      * Triggered after the playlist is sorted internally.
      *
      * @event playlistsorted
      * @type {Object}
      */
+
+
     player.trigger('playlistsorted');
   };
-
   /**
    * Shuffle the contents of the list randomly.
    *
@@ -543,52 +694,79 @@ export default function factory(player, initialList, initialIndex = 0) {
    *        playlist items after the current item. For example, when on the
    *        first item, will shuffle the second item and beyond.
    */
-  playlist.shuffle = ({rest} = {}) => {
-    let index = 0;
-    let arr = list;
 
-    // When options.rest is true, start randomization at the item after the
+
+  playlist.shuffle = function (_temp) {
+    var _ref = _temp === void 0 ? {} : _temp,
+        rest = _ref.rest;
+
+    var index = 0;
+    var arr = list; // When options.rest is true, start randomization at the item after the
     // current item.
+
     if (rest) {
       index = playlist.currentIndex_ + 1;
       arr = list.slice(index);
-    }
+    } // Bail if the array is empty or too short to shuffle.
 
-    // Bail if the array is empty or too short to shuffle.
+
     if (arr.length <= 1) {
       return;
     }
 
-    randomize(arr);
-
-    // When options.rest is true, splice the randomized sub-array back into
+    randomize(arr); // When options.rest is true, splice the randomized sub-array back into
     // the original array.
-    if (rest) {
-      list.splice(...[index, arr.length].concat(arr));
-    }
 
-    // If the playlist is changing, don't trigger events.
+    if (rest) {
+      var _list2;
+
+      (_list2 = list).splice.apply(_list2, [index, arr.length].concat(arr));
+    } // If the playlist is changing, don't trigger events.
+
+
     if (changing) {
       return;
     }
-
     /**
      * Triggered after the playlist is sorted internally.
      *
      * @event playlistsorted
      * @type {Object}
      */
+
+
     player.trigger('playlistsorted');
-  };
+  }; // If an initial list was given, populate the playlist with it.
 
-  // If an initial list was given, populate the playlist with it.
+
   if (Array.isArray(initialList)) {
-    playlist(initialList.slice(), initialIndex);
-
-  // If there is no initial list given, silently set an empty array.
+    playlist(initialList.slice(), initialIndex); // If there is no initial list given, silently set an empty array.
   } else {
     list = [];
   }
 
   return playlist;
 }
+
+var version = "4.2.6";
+
+var registerPlugin = videojs.registerPlugin || videojs.plugin;
+/**
+ * The video.js playlist plugin. Invokes the playlist-maker to create a
+ * playlist function on the specific player.
+ *
+ * @param {Array} list
+ *        a list of sources
+ *
+ * @param {number} item
+ *        The index to start at
+ */
+
+var plugin = function plugin(list, item) {
+  factory(this, list, item);
+};
+
+registerPlugin('playlist', plugin);
+plugin.VERSION = version;
+
+export default plugin;
